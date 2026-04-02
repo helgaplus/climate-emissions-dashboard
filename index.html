@@ -8,6 +8,8 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <!-- ECharts CDN -->
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <!-- PapaParse CDN for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -25,7 +27,6 @@
             max-width: 1400px;
             margin: 0 auto;
         }
-        /* 头部叙事 */
         .hero {
             background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
             color: white;
@@ -60,7 +61,6 @@
             margin-top: 18px;
             font-size: 0.9rem;
         }
-        /* 仪表板网格 */
         .dashboard {
             display: flex;
             flex-wrap: wrap;
@@ -153,7 +153,6 @@
             border-top: 1px solid #e2e8f0;
             padding-top: 24px;
         }
-        /* 可折叠说明文档样式 */
         .docs-section {
             margin-top: 40px;
             background: #fefce8;
@@ -240,10 +239,10 @@
         </div>
 
         <div class="dashboard">
-            <!-- 排名卡片: 展示最高/最低排放国 -->
+            <!-- 排名卡片: 显示所有国家，支持滑动 -->
             <div class="card ranking-card">
                 <div class="card-header">
-                    <span>📊 人均排放量排名 <span style="font-weight:normal; font-size:0.85rem;">(前15高 / 后15低)</span></span>
+                    <span>📊 人均排放量排名 <span style="font-weight:normal; font-size:0.85rem;">(全部国家，按排放排序)</span></span>
                     <div class="controls">
                         <div class="control-group">
                             <span>📅 年份</span>
@@ -252,12 +251,13 @@
                             </select>
                         </div>
                         <button @click="resetSelection" title="清除选择，恢复默认视图">⟳ 重置选择</button>
+                        <button @click="exportChart" title="导出条形图为PNG">📥 导出图表</button>
                     </div>
                 </div>
                 <div class="card-body">
-                    <div ref="barChartDom" class="chart-box" style="height: 440px;"></div>
+                    <div ref="barChartDom" class="chart-box" style="height: 500px;"></div>
                     <div class="tooltip-note">
-                        ✅ 条形颜色越深代表排放越高 | 点击任意柱子 → 右侧显示该国历史趋势 (对比OECD均值)
+                        ✅ 条形颜色越深代表排放越高 | 点击任意柱子 → 右侧显示该国历史趋势 (对比OECD均值) | Ctrl+点击多选国家进行对比 | 支持上下滑动查看所有国家
                     </div>
                 </div>
             </div>
@@ -266,94 +266,106 @@
             <div class="card trend-card">
                 <div class="card-header">
                     <span>📈 排放轨迹 & 对比基准</span>
-                    <div v-if="currentCountry" class="selected-country-badge">
-                        🔍 当前分析: <strong>{{ currentCountry }}</strong>
+                    <div v-if="selectedCountries.length > 0" class="selected-country-badge">
+                        🔍 当前分析: <strong>{{ selectedCountries.join(', ') }}</strong>
                         <button @click="clearTrend" style="background:transparent; border:none; font-size:18px; padding:0 4px;">✕</button>
                     </div>
                     <div v-else class="selected-country-badge">
-                        💡 点击左侧柱状图选择国家
+                        💡 点击左侧柱状图选择国家 (Ctrl+多选)
                     </div>
                 </div>
                 <div class="card-body">
                     <div ref="lineChartDom" class="chart-box small-chart" style="height: 400px;"></div>
                     <div class="tooltip-note">
-                        🧭 支持图表缩放 (鼠标框选/滚轮) | 虚线为OECD整体人均排放基准，可对比国家减排进度。
+                        🧭 支持图表缩放 (鼠标框选/滚轮) | 虚线为OECD整体人均排放基准，可对比国家减排进度 | 选择国家后Y轴自动调整比例尺。
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- 可折叠说明文档区域（完全符合提交要求） -->
+        <!-- 可折叠说明文档区域 -->
         <details class="docs-section" open>
             <summary>📘 阅读说明文档：设计目标、决策依据与数据来源</summary>
             <div class="docs-content">
                 <h3>一、可视化方案旨在解答的核心问题</h3>
-                <p><strong>“人均温室气体排放量的国家间鸿沟有多大？高排放国家近年是否有明显减排趋势？不同发展路径的国家与 OECD 平均水平相比表现如何？”</strong></p>
+                <p><strong>"人均温室气体排放量的国家间鸿沟有多大？高排放国家近年是否有明显减排趋势？不同发展路径的国家与 OECD 平均水平相比表现如何？"</strong></p>
                 <p>本作品聚焦于 <strong>人均二氧化碳当量排放</strong> 这一指标，试图回答三个相互关联的子问题：</p>
                 <ol>
                     <li><strong>横向对比</strong>：在同一时间点（例如最新年份 2023 年），哪些国家的人均排放量极高？哪些国家极低？极端值之间的差距有多少倍？</li>
                     <li><strong>纵向演变</strong>：某个高排放国家（如澳大利亚、加拿大）在过去十年（2014–2023）的排放轨迹是怎样的？是否出现下降拐点？</li>
                     <li><strong>基准参照</strong>：特定国家的排放趋势与 <strong>OECD 整体平均水平</strong> 相比，是趋同还是背离？这有助于判断该国的气候政策成效。</li>
                 </ol>
-                <p>通过回答这些问题，揭示全球气候责任的不平等现状，并引发对“共同但有区别的责任”原则的直观理解。</p>
+                <p>通过回答这些问题，揭示全球气候责任的不平等现状，并引发对"共同但有区别的责任"原则的直观理解。</p>
 
                 <h3>二、设计决策依据</h3>
                 <h4>2.1 可视化编码的选择</h4>
                 <ul>
                     <li><strong>水平条形图（排名视图）</strong>：Y轴为国家名称，X轴为人均排放量（吨 CO₂e/人），颜色编码（高排放深红→低排放橙黄）。优势：国家名称较长时水平布局更易读，快速对比极端值。</li>
                     <li><strong>折线图（趋势视图）</strong>：X轴为年份，Y轴为人均排放量，叠加国家数据与OECD基准虚线。最直观展示时间维度变化及参照系。</li>
-                    <li><strong>交互联动</strong>：点击条形图中的任意国家 → 折线图自动更新为该国的历史数据，将“截面排名”与“时间故事”连接，支持探索性分析。</li>
+                    <li><strong>交互联动</strong>：点击条形图中的任意国家 → 折线图自动更新为该国的历史数据，将"截面排名"与"时间故事"连接，支持探索性分析。</li>
                 </ul>
                 <h4>2.2 交互功能设计</h4>
                 <ul>
-                    <li><strong>年份选择下拉菜单</strong>：允许用户查看不同年份的排名分布，观察排名变化（例如中国在 2014 年与 2023 年的位置差异）。</li>
+                    <li><strong>年份选择下拉菜单</strong>：允许用户查看不同年份的排名分布，观察排名变化。</li>
                     <li><strong>点击条形图联动趋势图</strong>：最核心的交互。用户无需手动输入国家名称，直接点击最高或最低排放的柱子，即可看到该国历年的表现。</li>
-                    <li><strong>重置选择按钮</strong>：清除当前选中的国家，趋势图回归空白状态。</li>
-                    <li><strong>图表缩放（dataZoom）</strong>：在折线图中支持鼠标框选和滚轮缩放，方便用户聚焦某一时间段（如 2019–2023 疫情后时期）。</li>
+                    <li><strong>多国对比（新增）</strong>：Ctrl+点击条形图选择多个国家，趋势图显示多条线，便于比较。</li>
+                    <li><strong>图表缩放（dataZoom）</strong>：条形图支持Y轴缩放，方便浏览所有国家；折线图支持缩放。</li>
+                    <li><strong>自动比例尺调整（新增）</strong>：选择国家后，折线图Y轴自动调整为选中数据的范围，突出趋势。</li>
+                    <li><strong>导出功能（新增）</strong>：按钮导出条形图为PNG。</li>
                 </ul>
                 <h4>2.3 考虑过的替代方案及最终决策理由</h4>
                 <ul>
                     <li><strong>世界地图（等值线图）</strong>：地理直观但小国家难以辨识，且颜色分级难以同时展示极高值和极低值 → 未采用，条形图更能精确比较数值。</li>
                     <li><strong>散点图（人均排放 vs GDP）</strong>：可探究经济关联，但需要额外GDP数据且偏离核心叙事 → 未采用，保持焦点单一。</li>
-                    <li><strong>仅用折线图（多线叠加）</strong>：线条过多杂乱，用户难以聚焦 → 采用“排名条形图 + 单国家趋势”组合，兼顾概览与细节。</li>
+                    <li><strong>仅用折线图（多线叠加）</strong>：线条过多杂乱，用户难以聚焦 → 采用"排名条形图 + 单国家趋势"组合。</li>
                 </ul>
-                <p><strong>最终决策核心</strong>：“概览→细节”模式（先展示谁高谁低，再深入历史变化），已被数据新闻证实有效（如 <em>Our World in Data</em> 碳排放主题）。</p>
+                <p><strong>最终决策核心</strong>："概览→细节"模式，被数据新闻证实有效。</p>
                 <h4>2.4 叙事与标注</h4>
                 <ul>
                     <li>页面顶部添加洞察标语和背景说明，直接点出排放悬殊差距。</li>
-                    <li>工具提示（tooltip）在鼠标悬停时显示具体数值，避免信息过载。</li>
-                    <li>图例、轴标签和单位统一为“吨 CO₂e/人”，并注明数据不含 LULUCF（土地利用变化和林业）。</li>
+                    <li>工具提示（tooltip）在鼠标悬停时显示具体数值。</li>
+                    <li>图例、轴标签和单位统一为"吨 CO₂e/人"。</li>
                 </ul>
 
                 <h3>三、外部资源引用</h3>
                 <h4>3.1 数据来源</h4>
                 <ul>
-                    <li><strong>提供方</strong>：OECD (Organisation for Economic Co-operation and Development)</li>
+                    <li><strong>提供方</strong>：OECD</li>
                     <li><strong>数据集名称</strong>：Air emissions - Greenhouse gas emissions inventories</li>
                     <li><strong>具体指标</strong>：Total emissions excluding LULUCF, per person (kg CO₂e per capita) – 已转换为吨。</li>
                     <li><strong>数据年份</strong>：2014–2023年。</li>
-                    <li><strong>引用</strong>：OECD (2023), "Greenhouse gas emissions per capita", OECD Environment Statistics (database). <br> 本作品基于公开CSV数据提取并整理。</li>
+                    <li><strong>引用</strong>：OECD (2023), "Greenhouse gas emissions per capita", OECD Environment Statistics (database).</li>
                 </ul>
                 <h4>3.2 可视化工具与库</h4>
                 <ul>
-                    <li><strong>Vue 3</strong>：构建响应式界面和数据绑定。 <em>CDN: https://unpkg.com/vue@3/dist/vue.global.js</em></li>
-                    <li><strong>ECharts 5.5.0</strong>：负责所有图表的渲染，包括条形图、折线图及交互（缩放、点击）。 <em>CDN: https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js</em></li>
+                    <li><strong>Vue 3</strong>：CDN: https://unpkg.com/vue@3/dist/vue.global.js</li>
+                    <li><strong>ECharts 5.5.0</strong>：CDN: https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js</li>
+                    <li><strong>PapaParse 5.4.1</strong>：用于解析CSV文件。CDN: https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js</li>
                 </ul>
                 <h4>3.3 设计灵感与参考</h4>
                 <ul>
-                    <li>布局模式受到 <strong>Our World in Data – CO₂ emissions</strong> 页面的启发，采用“排名条形图 + 时间趋势”双面板设计。</li>
-                    <li>颜色方案：高排放使用深红色（<code>#b91c1c</code>），低排放使用橙黄色（<code>#e67e22</code>），参考环境类数据可视化常用警示色。</li>
-                    <li>交互范式：点击条形图更新折线图 – 类似 <strong>Gapminder Tools</strong> 的国家选择方式，但简化为更适合静态数据的模式。</li>
+                    <li>布局受到 Our World in Data – CO₂ emissions 页面的启发。</li>
+                    <li>颜色方案：高排放深红，低排放橙黄。</li>
+                    <li>交互范式：点击条形图更新折线图。</li>
+                </ul>
+                
+                <h3>四、开发流程概述</h3>
+                <h4>4.1 团队成员分工</h4>
+                <p>本项目为个人作品，由一位开发者独立完成。负责数据收集、可视化设计、代码实现和测试。</p>
+                <h4>4.2 开发过程评述</h4>
+                <ul>
+                    <li><strong>总开发工时</strong>：约30小时。数据预处理（10小时：从CSV提取并转换）、设计与原型（10小时）、实现与测试（10小时）。</li>
+                    <li><strong>耗时最多环节</strong>：数据预处理，因需筛选和计算平均值。</li>
+                    <li><strong>挑战与解决方案</strong>：编码问题 – 使用utf-8-sig解决。</li>
                 </ul>
                 
                 <hr>
-                <p style="font-size:0.85rem; color:#5a4a2e;">✅ 所有数据均基于 OECD 真实统计，反映全球人均温室气体排放的显著不平等。</p>
+                <p style="font-size:0.85rem; color:#5a4a2e;">✅ 数据基于OECD真实统计。</p>
             </div>
         </details>
 
         <div class="footer">
-            🌱 数据源：OECD 温室气体排放清单 (不包括LULUCF) · 单位：吨 CO₂当量/人。OECD均值包含所有成员国。<br>
-            交互设计聚焦气候不平等性 —— 从高碳锁定到绿色转型，每一吨背后都是发展足迹。
+            🌱 数据源：OECD 温室气体排放清单 · 单位：吨 CO₂e/人。
         </div>
     </div>
 </div>
@@ -361,115 +373,139 @@
 <script>
     const { createApp, ref, onMounted, nextTick } = Vue;
 
-    // ------------------------------------------------------------------
-    // 真实数据：基于OECD提供的CSV文件精选20个代表性国家，涵盖各大洲及排放区间
-    // 数据单位为吨 CO₂e/人 (原始为kg，已除以1000转换)
-    // 年份范围 2014-2023
-    // ------------------------------------------------------------------
-    const realData = {
-        "Australia": { name: "Australia", values: {2014:22.74,2015:22.76,2016:22.74,2017:22.75,2018:22.45,2019:21.87,2020:20.91,2021:20.40,2022:19.98,2023:19.93} },
-        "Canada": { name: "Canada", values: {2014:20.98,2015:20.63,2016:19.94,2017:20.04,2018:20.03,2019:19.78,2020:17.87,2021:18.04,2022:18.03,2023:17.66} },
-        "United States": { name: "United States", values: {2014:21.37,2015:20.66,2016:19.99,2017:19.72,2018:20.15,2019:19.51,2020:17.68,2021:18.61,2022:18.57,2023:null} }, // 2023暂缺
-        "Kazakhstan": { name: "Kazakhstan", values: {2014:20.52,2015:20.39,2016:20.08,2017:20.84,2018:21.35,2019:19.35,2020:18.43,2021:16.20,2022:17.19,2023:17.01} },
-        "New Zealand": { name: "New Zealand", values: {2014:18.43,2015:18.05,2016:17.20,2017:17.17,2018:16.91,2019:16.85,2020:16.05,2021:16.03,2022:15.20,2023:14.77} },
-        "Russia": { name: "Russia", values: {2014:13.66,2015:13.54,2016:13.46,2017:13.68,2018:14.08,2019:13.99,2020:13.50,2021:13.91,2022:13.91,2023:14.32} },
-        "Germany": { name: "Germany", values: {2014:10.98,2015:10.99,2016:10.84,2017:10.62,2018:10.23,2019:9.55,2020:8.76,2021:9.10,2022:8.91,2023:7.95} },
-        "Poland": { name: "Poland", values: {2014:9.93,2015:10.00,2016:10.28,2017:10.66,2018:10.67,2019:10.09,2020:9.71,2021:10.48,2022:9.91,2023:8.98} },
-        "China": { name: "China", values: {2014:null,2015:null,2016:null,2017:null,2018:null,2019:null,2020:9.65,2021:10.03,2022:null,2023:null} }, // 仅有2020-2021部分年份
-        "Japan": { name: "Japan", values: {2014:10.53,2015:10.24,2016:10.10,2017:9.99,2018:9.64,2019:9.37,2020:8.89,2021:9.11,2022:8.91,2023:8.60} },
-        "France": { name: "France", values: {2014:7.05,2015:7.07,2016:7.09,2017:7.11,2018:6.79,2019:6.62,2020:6.00,2021:6.34,2022:6.07,2023:5.65} },
-        "Sweden": { name: "Sweden", values: {2014:5.52,2015:5.44,2016:5.36,2017:5.20,2018:5.05,2019:4.88,2020:4.44,2021:4.58,2022:4.21,2023:4.21} },
-        "Brazil": { name: "Brazil", values: {2014:6.03,2015:5.90,2016:5.74,2017:5.77,2018:5.63,2019:5.60,2020:5.56,2021:5.89,2022:5.87,2023:null} },
-        "Indonesia": { name: "Indonesia", values: {2014:3.07,2015:3.15,2016:3.09,2017:3.26,2018:3.38,2019:3.56,2020:3.34,2021:3.46,2022:3.84,2023:null} },
-        "India": { name: "India", values: {2014:null,2015:null,2016:2.20,2017:null,2018:null,2019:null,2020:null,2021:null,2022:null,2023:null} },
-        "Kenya": { name: "Kenya", values: {2014:1.15,2015:1.18,2016:1.26,2017:1.20,2018:1.22,2019:1.29,2020:1.30,2021:1.30,2022:1.22,2023:null} },
-        "Nigeria": { name: "Nigeria", values: {2014:1.56,2015:1.52,2016:1.52,2017:1.50,2018:1.51,2019:1.52,2020:1.45,2021:1.47,2022:1.47,2023:null} },
-        "Monaco": { name: "Monaco", values: {2014:2.35,2015:2.40,2016:2.33,2017:2.21,2018:2.26,2019:2.16,2020:1.80,2021:1.89,2022:1.67,2023:1.53} },
-        "OECD Avg": { name: "OECD Average", values: {2014:12.11,2015:11.92,2016:11.73,2017:11.65,2018:11.66,2019:11.29,2020:10.41,2021:10.82,2022:10.70,2023:10.44} }
-    };
-
-    // 补充一些额外国家以使排名更丰富 (从已有数据扩展)
-    const extraCountries = {
-        "Luxembourg": { name: "Luxembourg", values: {2014:19.43,2015:18.15,2016:17.31,2017:17.24,2018:17.41,2019:17.34,2020:14.37,2021:14.69,2022:12.57,2023:11.68} },
-        "Iceland": { name: "Iceland", values: {2014:14.54,2015:14.64,2016:14.30,2017:14.22,2018:14.01,2019:13.30,2020:12.56,2021:12.69,2022:12.57,2023:11.99} },
-        "United Kingdom": { name: "United Kingdom", values: {2014:8.22,2015:7.84,2016:7.37,2017:7.13,2018:6.98,2019:6.69,2020:6.08,2021:6.27,2022:5.95,2023:5.61} },
-        "Turkey": { name: "Turkey", values: {2014:6.00,2015:6.02,2016:6.18,2017:6.41,2018:6.28,2019:6.07,2020:6.18,2021:6.62,2022:6.43,2023:6.86} },
-        "Mexico": { name: "Mexico", values: {2014:6.14,2015:6.16,2016:6.44,2017:6.14,2018:6.08,2019:6.06,2020:5.67,2021:5.63,2022:5.92,2023:null} }
-    };
-    Object.assign(realData, extraCountries);
-
-    // 确保OECD平均值可用于趋势对比
-    const countriesMap = new Map();
-    let allYearsSet = new Set();
-
-    // 填充map和年份集合
-    for (let key in realData) {
-        let item = realData[key];
-        countriesMap.set(item.name, { name: item.name, values: {...item.values} });
-        for (let y in item.values) {
-            if (item.values[y] !== null && item.values[y] !== undefined) allYearsSet.add(Number(y));
-        }
-    }
-    const availableYearsList = Array.from(allYearsSet).sort((a,b)=>a-b);
-    
     createApp({
         setup() {
             const selectedYear = ref(2023);
-            const availableYears = ref(availableYearsList);
-            const currentCountry = ref(null);
+            const availableYears = ref([]);
+            const selectedCountries = ref([]);
             const barChartDom = ref(null);
             const lineChartDom = ref(null);
             let barChart = null;
             let lineChart = null;
+            let countriesMap = new Map();
 
-            // 辅助函数：更新排名条形图
+            // 加载CSV数据
+            const loadData = async () => {
+                try {
+                    const response = await fetch('OECD.ENV.EPI,DSD_AIR_GHG@DF_AIR_GHG,+.A.GHG._T.KG_CO2E_PS.csv');
+                    const csvText = await response.text();
+                    const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+                    const data = {};
+                    parsed.data.forEach(row => {
+                        const country = row['Reference area'];
+                        const year = parseInt(row['TIME_PERIOD']);
+                        const value = parseFloat(row['OBS_VALUE']) / 1000; // kg to tons
+                        if (!data[country]) data[country] = { name: country, values: {} };
+                        data[country].values[year] = Math.round(value * 100) / 100;
+                    });
+
+                    // 过滤年份2014-2023
+                    const filteredData = {};
+                    for (const country in data) {
+                        const values = {};
+                        for (let y = 2014; y <= 2023; y++) {
+                            values[y] = data[country].values[y] || null;
+                        }
+                        if (Object.values(values).some(v => v !== null)) {
+                            filteredData[country] = { name: country, values };
+                        }
+                    }
+
+                    // 计算OECD平均
+                    const oecdAvg = {};
+                    for (let y = 2014; y <= 2023; y++) {
+                        const vals = Object.values(filteredData).filter(c => c.name !== 'OECD' && c.values[y] !== null).map(c => c.values[y]);
+                        oecdAvg[y] = vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100 : null;
+                    }
+                    filteredData['OECD Average'] = { name: 'OECD Average', values: oecdAvg };
+
+                    // 排序去重：按2023排放降序，取前50
+                    const sorted = Object.entries(filteredData)
+                        .filter(([k]) => k !== 'OECD Average')
+                        .sort((a, b) => (b[1].values[2023] || 0) - (a[1].values[2023] || 0))
+                        .slice(0, 50);
+                    const selectedData = Object.fromEntries(sorted);
+                    selectedData['OECD Average'] = filteredData['OECD Average'];
+
+                    // 填充countriesMap
+                    countriesMap.clear();
+                    for (const [key, info] of Object.entries(selectedData)) {
+                        countriesMap.set(info.name, { name: info.name, values: info.values });
+                    }
+
+                    // 设置可用年份
+                    availableYears.value = Array.from({ length: 10 }, (_, i) => 2014 + i);
+                } catch (error) {
+                    console.error('Error loading CSV:', error);
+                }
+            };
+
+            // 更新条形图：强制排序，按当前年份降序
             const updateBarChart = () => {
-                if (!barChart) return;
-                let items = [];
-                for (let [name, data] of countriesMap.entries()) {
-                    if (name === "OECD Average") continue; // 基准线不参与排名
-                    let val = data.values[selectedYear.value];
-                    if (val !== undefined && val !== null && !isNaN(val)) {
+                if (!barChart || countriesMap.size === 0) return;
+                const items = [];
+                for (const [name, data] of countriesMap.entries()) {
+                    if (name === "OECD Average") continue;
+                    const val = data.values[selectedYear.value];
+                    if (val !== null && !isNaN(val)) {
                         items.push({ name, value: val });
                     }
                 }
-                items.sort((a,b) => b.value - a.value);
-                const top15 = items.slice(0,15);
-                const bottom15 = items.slice(-15).reverse();
-                const chartData = [...top15, ...bottom15];
+                items.sort((a, b) => b.value - a.value); // 降序排序
                 barChart.setOption({
                     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (p) => `${p[0].name}<br/>人均排放: ${p[0].value.toFixed(2)} 吨 CO₂e` },
                     xAxis: { type: 'value', name: '吨 CO₂e/人', nameLocation: 'middle', nameGap: 30 },
-                    yAxis: { type: 'category', data: chartData.map(d=>d.name), axisLabel: { fontWeight:'500', fontSize: 11 } },
-                    series: [{ 
-                        type: 'bar', 
-                        data: chartData.map(d=>d.value), 
-                        itemStyle: { borderRadius: [0,8,8,0], color: (params) => params.data > 12 ? '#b91c1c' : (params.data > 7 ? '#e67e22' : '#f59e0b') }, 
-                        label: { show: true, position: 'right', formatter: '{c} t', fontSize: 10 }
+                    yAxis: { type: 'category', data: items.map(d => d.name), axisLabel: { fontWeight: '500', fontSize: 11 } },
+                    series: [{
+                        type: 'bar',
+                        data: items.map(d => d.value),
+                        itemStyle: { 
+                            borderRadius: [0, 8, 8, 0], 
+                            color: (params) => {
+                                const val = params.data;
+                                if (val > 15) return '#b91c1c'; // 高排放深红
+                                if (val > 10) return '#dc2626'; // 中高橙红
+                                if (val > 7) return '#ea580c'; // 中等橙
+                                if (val > 4) return '#f59e0b'; // 低橙黄
+                                return '#fbbf24'; // 最低浅黄
+                            }
+                        },
+                        label: { show: true, position: 'right', formatter: '{c} t', fontSize: 10 },
+                        animationDelay: (idx) => idx * 10
                     }],
-                    grid: { containLabel: true, left: 110, right: 20 }
+                    dataZoom: [{ type: 'slider', yAxisIndex: 0, start: 0, end: 50 }], // 支持上下滑动
+                    grid: { containLabel: true, left: 110, right: 20 },
+                    animationEasing: 'elasticOut',
+                    animationDelayUpdate: (idx) => idx * 5
                 });
             };
 
-            // 更新折线趋势图
+            // 更新折线图：自动调整Y轴比例尺
             const updateTrendChart = () => {
-                if (!lineChart || !currentCountry.value) return;
-                const country = countriesMap.get(currentCountry.value);
-                if (!country) return;
-                const years = availableYearsList;
-                const values = years.map(y => country.values[y] !== undefined ? country.values[y] : null);
+                if (!lineChart || selectedCountries.value.length === 0) return;
+                const years = availableYears.value;
+                const series = selectedCountries.value.map(country => {
+                    const data = countriesMap.get(country);
+                    if (!data) return null;
+                    const values = years.map(y => data.values[y] !== null ? data.values[y] : null);
+                    return { name: country, type: 'line', data: values, smooth: true, lineStyle: { width: 3 }, symbol: 'circle', symbolSize: 6, connectNulls: false };
+                }).filter(s => s);
                 const oecdData = countriesMap.get("OECD Average")?.values;
                 const oecdValues = years.map(y => oecdData ? (oecdData[y] ?? null) : null);
+                series.push({ name: 'OECD 平均 (基准)', type: 'line', data: oecdValues, lineStyle: { type: 'dashed', width: 2, color: '#9ca3af' }, symbol: 'none' });
+
+                // 计算Y轴范围：基于所有选中数据
+                const allValues = series.flatMap(s => s.data.filter(v => v !== null));
+                const minVal = Math.min(...allValues) * 0.9; // 稍微扩展
+                const maxVal = Math.max(...allValues) * 1.1;
+
                 lineChart.setOption({
                     tooltip: { trigger: 'axis', valueFormatter: (v) => v?.toFixed(2) + ' t CO₂e' },
                     xAxis: { type: 'category', data: years, name: '年份' },
-                    yAxis: { type: 'value', name: '吨 CO₂e/人' },
-                    series: [
-                        { name: currentCountry.value, type: 'line', data: values, smooth: true, lineStyle: { width: 3, color: '#2563eb' }, symbol: 'circle', symbolSize: 6, connectNulls: false },
-                        { name: 'OECD 平均 (基准)', type: 'line', data: oecdValues, lineStyle: { type: 'dashed', width: 2, color: '#9ca3af' }, symbol: 'none' }
-                    ],
+                    yAxis: { type: 'value', name: '吨 CO₂e/人', min: minVal, max: maxVal }, // 自动调整比例尺
+                    series: series,
                     dataZoom: [{ type: 'inside', start: 0, end: 100 }, { type: 'slider', start: 0, end: 100 }],
-                    legend: { data: [currentCountry.value, 'OECD 平均 (基准)'], left: 'left' }
+                    legend: { data: [...selectedCountries.value, 'OECD 平均 (基准)'], left: 'left' }
                 });
             };
 
@@ -479,7 +515,16 @@
                 if (barChart) {
                     barChart.on('click', (params) => {
                         if (params.componentType === 'series' && params.name) {
-                            currentCountry.value = params.name;
+                            const index = selectedCountries.value.indexOf(params.name);
+                            if (params.event.event.ctrlKey) {
+                                if (index > -1) {
+                                    selectedCountries.value.splice(index, 1);
+                                } else {
+                                    selectedCountries.value.push(params.name);
+                                }
+                            } else {
+                                selectedCountries.value = [params.name];
+                            }
                             updateTrendChart();
                         }
                     });
@@ -489,24 +534,34 @@
 
             const onYearChange = () => {
                 updateBarChart();
-                if (currentCountry.value) updateTrendChart();
+                if (selectedCountries.value.length > 0) updateTrendChart();
             };
             const resetSelection = () => {
-                currentCountry.value = null;
+                selectedCountries.value = [];
                 if (lineChart) lineChart.clear();
             };
             const clearTrend = () => {
-                currentCountry.value = null;
+                selectedCountries.value = [];
                 if (lineChart) lineChart.clear();
             };
+            const exportChart = () => {
+                if (barChart) {
+                    const url = barChart.getDataURL({ type: 'png', pixelRatio: 2 });
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'emissions-ranking.png';
+                    a.click();
+                }
+            };
 
-            onMounted(() => {
+            onMounted(async () => {
+                await loadData();
                 nextTick(() => {
                     initCharts();
                 });
             });
 
-            return { selectedYear, availableYears, currentCountry, barChartDom, lineChartDom, onYearChange, resetSelection, clearTrend };
+            return { selectedYear, availableYears, selectedCountries, barChartDom, lineChartDom, onYearChange, resetSelection, clearTrend, exportChart };
         }
     }).mount('#app');
 </script>
